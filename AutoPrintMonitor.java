@@ -250,13 +250,6 @@ public class AutoPrintMonitor {
 
     // ==================== 打印逻辑 ====================
 
-    /**
-     * 打印图片：
-     *   - 根据图片方向自动设置页面方向（横图用横向，竖图用纵向），让图片尽可能大
-     *   - 等比缩放，保证图片完整显示（不裁剪）
-     *   - 居中绘制
-     *   - 静默打印，不弹出打印对话框
-     */
     private static void printImage(File file) throws Exception {
         BufferedImage image = ImageIO.read(file);
         if (image == null) {
@@ -264,27 +257,37 @@ public class AutoPrintMonitor {
         }
 
         PrinterJob job = PrinterJob.getPrinterJob();
-        PageFormat pf = job.defaultPage();
 
-        // 依据图片宽高比选择页面方向，最大化利用纸张
-        double imgRatio = (double) image.getWidth() / image.getHeight();
-        if (imgRatio > 1.0) {
-            pf.setOrientation(PageFormat.LANDSCAPE);
-        } else {
-            pf.setOrientation(PageFormat.PORTRAIT);
-        }
+        // ========== 构造 A4 竖版页面 ==========
+        // A4 尺寸（单位：pt，1 pt = 1/72 inch）
+        // 210mm × 297mm = 595.28 pt × 841.89 pt
+        final double A4_W = 595.28;
+        final double A4_H = 841.89;
+        // 安全边距，避免图片被打印到打印机不可打印区域（约 6.35mm）
+        final double MARGIN = 18.0;
+
+        Paper a4Paper = new Paper();
+        a4Paper.setSize(A4_W, A4_H);
+        // 可打印区域 = A4 去掉四周安全边距
+        a4Paper.setImageableArea(
+                MARGIN,
+                MARGIN,
+                A4_W - 2 * MARGIN,
+                A4_H - 2 * MARGIN);
+
+        PageFormat pf = new PageFormat();
+        pf.setPaper(a4Paper);
+        pf.setOrientation(PageFormat.PORTRAIT); // 强制竖版
 
         job.setPrintable(new FitImagePrintable(image), pf);
 
-        // 静默打印（不调用 job.printDialog()）
+        // 静默打印
         job.print();
 
         log("已提交打印任务: " + file.getName());
     }
 
-    /**
-     * 自定义 Printable：等比缩放并居中，确保图片完整显示
-     */
+
     static class FitImagePrintable implements Printable {
         private final BufferedImage image;
 
@@ -299,8 +302,6 @@ public class AutoPrintMonitor {
             }
 
             Graphics2D g2d = (Graphics2D) g;
-
-            // 高质量渲染
             g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
                     RenderingHints.VALUE_INTERPOLATION_BILINEAR);
             g2d.setRenderingHint(RenderingHints.KEY_RENDERING,
@@ -313,12 +314,14 @@ public class AutoPrintMonitor {
             double pageW = pf.getImageableWidth();
             double pageH = pf.getImageableHeight();
 
-            // 等比缩放：确保整幅图完整放进可打印区域
+            // 关键：取 min → 图片完整显示，短边方向留白
+            //       取 max → 铺满整页，但会裁剪掉长边超出部分
             double scale = Math.min(pageW / imgW, pageH / imgH);
+
             double drawW = imgW * scale;
             double drawH = imgH * scale;
 
-            // 居中
+            // 在可打印区域居中
             double x = pf.getImageableX() + (pageW - drawW) / 2.0;
             double y = pf.getImageableY() + (pageH - drawH) / 2.0;
 
@@ -330,7 +333,6 @@ public class AutoPrintMonitor {
             return PAGE_EXISTS;
         }
     }
-
     // ==================== 悬浮通知 ====================
 
     /**
